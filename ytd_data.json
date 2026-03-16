@@ -1,0 +1,101 @@
+{
+  "brandon sinner": {
+    "gross": 7535.0,
+    "federal": 811.12,
+    "social_security": 467.18,
+    "medicare": 109.26,
+    "state": 327.76,
+    "tools_purch": 200.0,
+    "levy_garn": 1062.93,
+    "insurance": 64.0,
+    "net": 4492.77
+  },
+  "brandon": {
+    "gross": 2002.5,
+    "federal": 215.47,
+    "social_security": 124.16,
+    "medicare": 29.04,
+    "state": 85.51,
+    "tools_purch": 50.0,
+    "levy_garn": 387.08,
+    "insurance": 16.0,
+    "net": 1095.25
+  },
+  "b": {
+    "gross": 8105.0,
+    "federal": 872.1,
+    "social_security": 502.52,
+    "medicare": 117.53,
+    "state": 346.09,
+    "tools_purch": 210.0,
+    "levy_garn": 1566.69,
+    "insurance": 64.0,
+    "net": 4426.09
+  },
+  "n": {
+    "gross": 2002.5,
+    "federal": 215.47,
+    "social_security": 124.16,
+    "medicare": 29.04,
+    "state": 85.51,
+    "tools_purch": 50.0,
+    "levy_garn": 387.08,
+    "insurance": 0,
+    "net": 1111.25
+  },
+  "dome": {
+    "gross": 694.0,
+    "federal": 74.67,
+    "social_security": 43.03,
+    "medicare": 10.06,
+    "state": 29.63,
+    "tools_purch": 1.0,
+    "levy_garn": 0.0,
+    "insurance": 0.0,
+    "net": 535.6
+  },
+  "br": {
+    "gross": 2002.5,
+    "federal": 260.32,
+    "social_security": 124.16,
+    "medicare": 29.04,
+    "state": 92.92,
+    "tools_purch": 50.0,
+    "levy_garn": 675.85,
+    "insurance": 16.0,
+    "net": 754.22
+  },
+  "bb": {
+    "gross": 2002.5,
+    "federal": 215.67,
+    "social_security": 124.16,
+    "medicare": 29.04,
+    "state": 88.91,
+    "tools_purch": 50.0,
+    "levy_garn": 0.0,
+    "insurance": 0.0,
+    "net": 1494.73
+  },
+  "gv": {
+    "gross": 2002.5,
+    "federal": 215.67,
+    "social_security": 124.16,
+    "medicare": 29.04,
+    "state": 88.91,
+    "tools_purch": 50.0,
+    "levy_garn": 675.85,
+    "insurance": 16.0,
+    "net": 802.88
+  },
+  "chris sinner": {
+    "gross": 2647.5,
+    "federal": 285.14,
+    "social_security": 164.15,
+    "medicare": 38.39,
+    "state": 117.55,
+    "tools_purch": 50.0,
+    "levy_garn": 0.0,
+    "insurance": 16.0,
+    "net": 1976.28
+  }
+}
