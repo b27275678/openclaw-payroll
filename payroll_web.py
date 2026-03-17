@@ -169,8 +169,7 @@ button:hover{opacity:0.9}
 </style>
 </head>
 <body>
-<h1>&#9889; OpenClaw Payroll</h1>
-<h2 style="text-align:center;color:#aaa">Electrical Systems Inc.</h2>
+<h1>&#9889; Payroll</h1>
 <div class="tabs">
   <div class="tab active" onclick="showTab('sync',this)">1. Import Hours</div>
   <div class="tab" onclick="showTab('employees',this)">2. Employees</div>
