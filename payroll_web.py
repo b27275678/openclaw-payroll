@@ -1,6 +1,7 @@
 import json
 import csv
 import os
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -9,6 +10,7 @@ STATE_TAX = 0.0444
 SOCIAL_SECURITY = 0.062
 MEDICARE = 0.0145
 YTD_FILE = "ytd_data.json"
+EMPLOYEES_FILE = "employees.json"
 
 def load_ytd():
     if os.path.exists(YTD_FILE):
@@ -19,6 +21,16 @@ def load_ytd():
 def save_ytd(ytd):
     with open(YTD_FILE, "w") as f:
         json.dump(ytd, f, indent=2)
+
+def load_employees():
+    if os.path.exists(EMPLOYEES_FILE):
+        with open(EMPLOYEES_FILE) as f:
+            return json.load(f)
+    return []
+
+def save_employees(emps):
+    with open(EMPLOYEES_FILE, "w") as f:
+        json.dump(emps, f, indent=2)
 
 def calculate(data):
     r = float(data.get("regular_hours", 0))
@@ -59,6 +71,45 @@ def calculate(data):
         "net": round(net, 2)
     }
 
+def parse_duration(duration_str):
+    """Parse duration string like '5 hrs 34 mins 29 secs' into total hours"""
+    if not duration_str:
+        return 0
+    total = 0
+    h = re.search(r'(\d+)\s*hr', duration_str)
+    m = re.search(r'(\d+)\s*min', duration_str)
+    s = re.search(r'(\d+)\s*sec', duration_str)
+    if h: total += int(h.group(1))
+    if m: total += int(m.group(1)) / 60
+    if s: total += int(s.group(1)) / 3600
+    return round(total, 2)
+
+def parse_timecard_csv(content):
+    """Parse RazorSync Detailed Time Card CSV and return hours per employee"""
+    hours = {}
+    lines = content.strip().split('\n')
+    current_emp = None
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        parts = [p.strip().strip('"') for p in line.split(',')]
+        # Detect employee total row: "Name TOTAL , , , , 0 mins"
+        if 'TOTAL' in line and len(parts) >= 5:
+            name = parts[0].replace('TOTAL', '').strip()
+            total_str = next((p for p in parts if 'mins' in p or 'hrs' in p), '')
+            if name:
+                current_emp = name
+                hours[name] = parse_duration(total_str) if total_str and total_str != '0 mins' else 0
+        # Detect Out row with duration
+        elif len(parts) >= 8 and 'Out' in parts:
+            duration_idx = 7 if len(parts) > 7 else -1
+            if duration_idx > 0 and parts[duration_idx]:
+                hrs = parse_duration(parts[duration_idx])
+                if current_emp and hrs > 0:
+                    hours[current_emp] = hours.get(current_emp, 0) + hrs
+    return hours
+
 HTML = """<!DOCTYPE html>
 <html>
 <head>
@@ -68,44 +119,148 @@ body{font-family:Arial;background:#1a1a2e;color:#eee;margin:0;padding:20px}
 h1{color:#f5e642;text-align:center}
 h2{color:#f5e642}
 .card{background:#16213e;border-radius:10px;padding:20px;margin:20px auto;max-width:900px}
-input{background:#0f3460;border:1px solid #f5e642;color:#fff;padding:8px;border-radius:5px;width:100%;box-sizing:border-box;margin:4px 0}
+input,select{background:#0f3460;border:1px solid #f5e642;color:#fff;padding:8px;border-radius:5px;width:100%;box-sizing:border-box;margin:4px 0}
 label{font-size:12px;color:#aaa}
 .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
 .grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
 button{background:#f5e642;color:#000;border:none;padding:12px 24px;border-radius:5px;cursor:pointer;font-weight:bold;font-size:16px;margin:10px 5px}
 button:hover{opacity:0.9}
-.add-btn{background:#27ae60}
-.remove-btn{background:#e74c3c;padding:6px 12px;font-size:12px}
+.add-btn{background:#27ae60;color:#fff}
+.remove-btn{background:#e74c3c;color:#fff;padding:6px 12px;font-size:12px}
+.sync-btn{background:#1d9e75;color:#fff;width:100%;margin:8px 0}
 .stub{background:#0f3460;border-radius:8px;padding:15px;margin:10px 0;font-family:monospace}
 .stub h3{color:#f5e642;margin:0 0 10px}
 .row{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #333}
 .total{color:#f5e642;font-weight:bold;font-size:18px}
-#results{display:none}
 .summary{background:#27ae60;border-radius:8px;padding:15px;margin:10px 0;text-align:center}
+.sync-box{background:#0a2a1a;border:1px solid #1d9e75;border-radius:8px;padding:15px;margin-bottom:15px}
+.sync-box h3{color:#1d9e75;margin:0 0 10px}
+.alert{padding:10px;border-radius:5px;margin:8px 0;font-size:13px}
+.alert-info{background:#0f3460;border:1px solid #4a90d9;color:#adf}
+.alert-success{background:#0a2a1a;border:1px solid #27ae60;color:#afd}
+.alert-warn{background:#2a1a0a;border:1px solid #f5e642;color:#fda}
+.tabs{display:flex;gap:5px;margin-bottom:15px}
+.tab{padding:10px 20px;border-radius:5px;cursor:pointer;background:#0f3460;border:1px solid #333}
+.tab.active{background:#f5e642;color:#000;font-weight:bold}
+.tab-content{display:none}
+.tab-content.active{display:block}
 </style>
 </head>
 <body>
 <h1>⚡ OpenClaw Payroll</h1>
 <h2 style="text-align:center;color:#aaa">Electrical Systems Inc.</h2>
+
+<div style="max-width:900px;margin:0 auto">
+<div class="tabs">
+  <div class="tab active" onclick="showTab('sync')">1. Import Hours</div>
+  <div class="tab" onclick="showTab('employees')">2. Employees</div>
+  <div class="tab" onclick="showTab('payroll')">3. Run Payroll</div>
+</div>
+
+<div id="tab-sync" class="tab-content active">
+<div class="card">
+  <h2>Import Hours from RazorSync</h2>
+  <div class="sync-box">
+    <h3>Step-by-step every payday:</h3>
+    <div class="alert alert-info">
+      1. Go to RazorSync → Reports → Time Card → Detailed Time Card<br>
+      2. Set your pay period dates and click RUN<br>
+      3. Click EXPORT TO EXCEL and save the file<br>
+      4. Upload that file below — hours fill in automatically!
+    </div>
+    <label>Upload RazorSync Time Card File (Excel or CSV)</label>
+    <input type="file" id="timecard-file" accept=".csv,.xlsx,.xls" style="margin:10px 0">
+    <button class="sync-btn" onclick="uploadTimecard()">Upload & Auto-Fill Hours</button>
+    <div id="sync-result"></div>
+  </div>
+</div>
+</div>
+
+<div id="tab-employees" class="tab-content">
 <div class="card">
   <h2>Employees</h2>
   <div id="employees"></div>
   <button class="add-btn" onclick="addEmployee()">+ Add Employee</button>
+  <button onclick="saveEmployees()" style="background:#4a90d9;color:#fff;margin-left:10px">Save Employee List</button>
 </div>
+</div>
+
+<div id="tab-payroll" class="tab-content">
 <div class="card">
   <button onclick="runPayroll()" style="width:100%;font-size:20px;padding:16px">RUN PAYROLL</button>
 </div>
-<div class="card" id="results">
+<div class="card" id="results" style="display:none">
   <h2>Pay Stubs</h2>
   <div id="stubs"></div>
   <div class="summary" id="summary"></div>
   <button onclick="savePayroll()">💾 Save to CSV</button>
 </div>
+</div>
+</div>
+
 <script>
 let empCount = 0;
 let payrollData = [];
-function addEmployee(){
+
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+async function uploadTimecard() {
+  const file = document.getElementById('timecard-file').files[0];
+  if (!file) { alert('Please select a file first'); return; }
+  const res = document.getElementById('sync-result');
+  res.innerHTML = '<div class="alert alert-info">Reading file...</div>';
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const r = await fetch('/upload-timecard', {method:'POST', body: formData});
+    const data = await r.json();
+    if (data.success) {
+      let msg = '<div class="alert alert-success">Hours updated:<br>';
+      Object.entries(data.hours).forEach(([name, hrs]) => {
+        msg += `• ${name}: ${hrs} hrs`;
+        const reg = Math.min(hrs, 40);
+        const ot = Math.max(hrs - 40, 0);
+        if (ot > 0) msg += ` (${reg} regular + ${ot} OT)`;
+        msg += '<br>';
+      });
+      msg += '<br>Go to Employees tab to review, then Run Payroll!</div>';
+      res.innerHTML = msg;
+      updateEmployeeHours(data.hours);
+    } else {
+      res.innerHTML = '<div class="alert alert-warn">Could not read hours from file. ' + (data.error||'') + '</div>';
+    }
+  } catch(e) {
+    res.innerHTML = '<div class="alert alert-warn">Upload failed. Try saving the file as CSV first.</div>';
+  }
+}
+
+function updateEmployeeHours(hours) {
+  for (let i = 1; i <= empCount; i++) {
+    const el = document.getElementById('emp_'+i);
+    if (!el) continue;
+    const nameEl = document.getElementById('name_'+i);
+    if (!nameEl) continue;
+    const name = nameEl.value.toLowerCase();
+    for (const [empName, totalHrs] of Object.entries(hours)) {
+      if (name && empName.toLowerCase().includes(name) || name.includes(empName.toLowerCase().split(' ')[0].toLowerCase())) {
+        const reg = Math.min(totalHrs, 40);
+        const ot = Math.max(totalHrs - 40, 0);
+        document.getElementById('reg_'+i).value = reg.toFixed(2);
+        document.getElementById('ot_'+i).value = ot.toFixed(2);
+        break;
+      }
+    }
+  }
+}
+
+function addEmployee(data) {
   empCount++;
+  const d = data || {};
   const div = document.createElement('div');
   div.id = 'emp_'+empCount;
   div.style='background:#0f3460;padding:15px;border-radius:8px;margin:10px 0';
@@ -115,27 +270,52 @@ function addEmployee(){
       <button class="remove-btn" onclick="removeEmp(${empCount})">Remove</button>
     </div>
     <div class="grid2">
-      <div><label>Full Name</label><input placeholder="JOHN SMITH" id="name_${empCount}"></div>
-      <div><label>Employee ID</label><input placeholder="JOHNS-XXX-XX-0000" id="emp_id_${empCount}"></div>
+      <div><label>Full Name</label><input placeholder="JOHN SMITH" id="name_${empCount}" value="${d.name||''}"></div>
+      <div><label>Employee ID</label><input placeholder="JOHNS-XXX-XX-0000" id="emp_id_${empCount}" value="${d.emp_id||''}"></div>
     </div>
     <div class="grid">
-      <div><label>Hourly Rate $</label><input type="number" placeholder="20.00" id="rate_${empCount}" step="0.01"></div>
-      <div><label>Regular Hours</label><input type="number" placeholder="80" id="reg_${empCount}" step="0.01"></div>
-      <div><label>Overtime Hours</label><input type="number" placeholder="0" id="ot_${empCount}" step="0.01" value="0"></div>
+      <div><label>Hourly Rate $</label><input type="number" placeholder="20.00" id="rate_${empCount}" step="0.01" value="${d.rate||''}"></div>
+      <div><label>Regular Hours</label><input type="number" placeholder="80" id="reg_${empCount}" step="0.01" value="${d.reg||80}"></div>
+      <div><label>Overtime Hours</label><input type="number" placeholder="0" id="ot_${empCount}" step="0.01" value="${d.ot||0}"></div>
     </div>
     <div class="grid">
-      <div><label>Holiday Hours</label><input type="number" placeholder="0" id="hol_${empCount}" step="0.01" value="0"></div>
-      <div><label>BonusTravel Hours</label><input type="number" placeholder="0" id="bt_h_${empCount}" step="0.01" value="0"></div>
-      <div><label>BonusTravel Rate $</label><input type="number" placeholder="0" id="bt_r_${empCount}" step="0.01" value="0"></div>
+      <div><label>Holiday Hours</label><input type="number" placeholder="0" id="hol_${empCount}" step="0.01" value="${d.holiday||0}"></div>
+      <div><label>BonusTravel Hours</label><input type="number" placeholder="0" id="bt_h_${empCount}" step="0.01" value="${d.travel||0}"></div>
+      <div><label>BonusTravel Rate $</label><input type="number" placeholder="0" id="bt_r_${empCount}" step="0.01" value="${d.travelRate||0}"></div>
     </div>
     <div class="grid">
-      <div><label>ToolsPurch $</label><input type="number" placeholder="0" id="tools_${empCount}" step="0.01" value="0"></div>
-      <div><label>LevyGarn $</label><input type="number" placeholder="0" id="levy_${empCount}" step="0.01" value="0"></div>
-      <div><label>Insurance $</label><input type="number" placeholder="0" id="ins_${empCount}" step="0.01" value="0"></div>
+      <div><label>ToolsPurch $</label><input type="number" placeholder="0" id="tools_${empCount}" step="0.01" value="${d.tools||0}"></div>
+      <div><label>LevyGarn $</label><input type="number" placeholder="0" id="levy_${empCount}" step="0.01" value="${d.levy||0}"></div>
+      <div><label>Insurance $</label><input type="number" placeholder="0" id="ins_${empCount}" step="0.01" value="${d.insurance||0}"></div>
     </div>`;
   document.getElementById('employees').appendChild(div);
 }
+
 function removeEmp(n){ document.getElementById('emp_'+n).remove(); }
+
+async function saveEmployees() {
+  const emps = [];
+  for(let i=1;i<=empCount;i++){
+    const el = document.getElementById('emp_'+i);
+    if(!el) continue;
+    emps.push({
+      name: document.getElementById('name_'+i).value,
+      emp_id: document.getElementById('emp_id_'+i).value,
+      rate: document.getElementById('rate_'+i).value,
+      reg: document.getElementById('reg_'+i).value,
+      ot: document.getElementById('ot_'+i).value,
+      holiday: document.getElementById('hol_'+i).value,
+      travel: document.getElementById('bt_h_'+i).value,
+      travelRate: document.getElementById('bt_r_'+i).value,
+      tools: document.getElementById('tools_'+i).value,
+      levy: document.getElementById('levy_'+i).value,
+      insurance: document.getElementById('ins_'+i).value
+    });
+  }
+  await fetch('/save-employees', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(emps)});
+  alert('Employees saved!');
+}
+
 async function runPayroll(){
   payrollData = [];
   for(let i=1;i<=empCount;i++){
@@ -160,6 +340,7 @@ async function runPayroll(){
   }
   showResults();
 }
+
 function showResults(){
   document.getElementById('results').style.display='block';
   let html='';
@@ -186,25 +367,68 @@ function showResults(){
   document.getElementById('summary').innerHTML=`Total Employees: ${payrollData.length} | Total Gross: $${totalGross.toFixed(2)} | Total Net: $${totalNet.toFixed(2)}`;
   window.scrollTo(0, document.getElementById('results').offsetTop);
 }
+
 async function savePayroll(){
   await fetch('/save', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payrollData)});
   alert('Payroll saved to CSV!');
 }
-addEmployee();
+
+// Load saved employees on startup
+fetch('/get-employees').then(r=>r.json()).then(emps=>{
+  if(emps && emps.length > 0) {
+    emps.forEach(e => addEmployee(e));
+  } else {
+    addEmployee();
+  }
+});
 </script>
 </body>
 </html>"""
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args): pass
+
     def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(HTML.encode())
+        if self.path == '/get-employees':
+            emps = load_employees()
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(emps).encode())
+        else:
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(HTML.encode())
+
     def do_POST(self):
+        if self.path == '/upload-timecard':
+            import cgi
+            ctype, pdict = cgi.parse_header(self.headers.get('Content-Type',''))
+            if ctype == 'multipart/form-data':
+                pdict['boundary'] = bytes(pdict['boundary'], 'utf-8')
+                fields = cgi.parse_multipart(self.rfile, pdict)
+                file_data = fields.get('file', [b''])[0]
+                if isinstance(file_data, bytes):
+                    content = file_data.decode('utf-8', errors='ignore')
+                else:
+                    content = str(file_data)
+                try:
+                    hours = parse_timecard_csv(content)
+                    result = {'success': True, 'hours': hours}
+                except Exception as e:
+                    result = {'success': False, 'error': str(e)}
+            else:
+                result = {'success': False, 'error': 'Invalid upload'}
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+
         length = int(self.headers["Content-Length"])
         data = json.loads(self.rfile.read(length))
+
         if self.path == "/calculate":
             result = calculate(data)
             ytd = load_ytd()
@@ -218,6 +442,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+
         elif self.path == "/save":
             filename = f"payroll_{datetime.now().strftime('%Y%m%d')}.csv"
             with open(filename, "w", newline="") as f:
@@ -227,6 +452,10 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.end_headers()
 
+        elif self.path == "/save-employees":
+            save_employees(data)
+            self.send_response(200)
+            self.end_headers()
+
 print("OpenClaw Payroll running at http://localhost:8080")
-print("Open your browser and go to: http://localhost:8080")
 HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
