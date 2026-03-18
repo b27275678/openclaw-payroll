@@ -93,25 +93,15 @@ def parse_timecard_xlsx(file_bytes):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
     hours = {}
-    current_emp = None
     for row in ws.iter_rows(values_only=True):
         cells = [str(c).strip() if c is not None else '' for c in row]
-        full = ' '.join(cells)
-        if 'TOTAL' in full:
-            for i, c in enumerate(cells):
-                if 'TOTAL' in c:
-                    name = c.replace('TOTAL', '').strip()
-                    if name:
-                        current_emp = name
-                        dur = next((x for x in cells if 'min' in x or 'hr' in x), '')
-                        hours[name] = parse_duration(dur) if dur and dur != '0 mins' else 0
-                    break
-        elif 'Out' in cells:
-            dur = next((c for c in cells if ('hr' in c or 'min' in c) and c != ''), '')
-            if dur and current_emp:
-                hours[current_emp] = hours.get(current_emp, 0) + parse_duration(dur)
+        if len(cells) > 6:
+            name = cells[2]
+            status = cells[4]
+            duration = cells[6]
+            if name and status == 'TOTAL':
+                hours[name] = parse_duration(duration)
     return hours
-
 def parse_timecard_csv(content):
     hours = {}
     current_emp = None
@@ -161,7 +151,7 @@ button:hover{opacity:0.9}
 .alert-info{background:#0f3460;border:1px solid #4a90d9;color:#adf}
 .alert-success{background:#0a2a1a;border:1px solid #27ae60;color:#afd}
 .alert-warn{background:#2a1a0a;border:1px solid #f5e642;color:#fda}
-.tabs{display:flex;gap:5px;max-width:900px;margin:0 auto 15px}
+.tabs{display:flex;gap:5px;margin-bottom:15px;max-width:900px;margin:0 auto 15px}
 .tab{padding:10px 20px;border-radius:5px;cursor:pointer;background:#0f3460;border:1px solid #333;color:#eee}
 .tab.active{background:#f5e642;color:#000;font-weight:bold}
 .tab-content{display:none;max-width:900px;margin:0 auto}
@@ -242,8 +232,8 @@ async function uploadTimecard(){
       msg+='<br>Go to Employees tab to review, then Run Payroll!</div>';
       res.innerHTML=msg;
       updateEmployeeHours(data.hours);
-    }else{
-      res.innerHTML='<div class="alert alert-warn">No hours found. Make sure you exported the Detailed Time Card from RazorSync.</div>';
+    } else {
+      res.innerHTML='<div class="alert alert-warn">No hours found in file. Make sure you exported the Detailed Time Card from RazorSync.</div>';
     }
   }catch(e){
     res.innerHTML='<div class="alert alert-warn">Upload failed: '+e.message+'</div>';
@@ -259,7 +249,8 @@ function updateEmployeeHours(hours){
     for(const[empName,totalHrs]of Object.entries(hours)){
       const en=empName.toLowerCase();
       const firstName=en.split(' ')[0];
-      if(name&&(en.includes(name)||name.includes(firstName)||firstName.includes(name.split(' ')[0]))){
+      const lastName=en.split(' ').slice(-1)[0];
+      if(name&&(en.includes(name)||name.includes(firstName)||name.includes(lastName)||firstName.includes(name.split(' ')[0]))){
         document.getElementById('reg_'+i).value=Math.min(totalHrs,40).toFixed(2);
         document.getElementById('ot_'+i).value=Math.max(totalHrs-40,0).toFixed(2);
         break;
@@ -273,7 +264,30 @@ function addEmployee(data){
   const div=document.createElement('div');
   div.id='emp_'+empCount;
   div.style='background:#0f3460;padding:15px;border-radius:8px;margin:10px 0';
-  div.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center"><b>Employee #${empCount}</b><button class="remove-btn" onclick="removeEmp(${empCount})">Remove</button></div><div class="grid2"><div><label>Full Name</label><input placeholder="JOHN SMITH" id="name_${empCount}" value="${d.name||''}"></div><div><label>Employee ID</label><input placeholder="ID" id="emp_id_${empCount}" value="${d.emp_id||''}"></div></div><div class="grid"><div><label>Hourly Rate $</label><input type="number" id="rate_${empCount}" step="0.01" value="${d.rate||''}"></div><div><label>Regular Hours</label><input type="number" id="reg_${empCount}" step="0.01" value="${d.reg||80}"></div><div><label>Overtime Hours</label><input type="number" id="ot_${empCount}" step="0.01" value="${d.ot||0}"></div></div><div class="grid"><div><label>Holiday Hours</label><input type="number" id="hol_${empCount}" step="0.01" value="${d.holiday||0}"></div><div><label>BonusTravel Hours</label><input type="number" id="bt_h_${empCount}" step="0.01" value="${d.travel||0}"></div><div><label>BonusTravel Rate $</label><input type="number" id="bt_r_${empCount}" step="0.01" value="${d.travelRate||0}"></div></div><div class="grid"><div><label>ToolsPurch $</label><input type="number" id="tools_${empCount}" step="0.01" value="${d.tools||0}"></div><div><label>LevyGarn $</label><input type="number" id="levy_${empCount}" step="0.01" value="${d.levy||0}"></div><div><label>Insurance $</label><input type="number" id="ins_${empCount}" step="0.01" value="${d.insurance||0}"></div></div>`;
+  div.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <b>Employee #${empCount}</b>
+      <button class="remove-btn" onclick="removeEmp(${empCount})">Remove</button>
+    </div>
+    <div class="grid2">
+      <div><label>Full Name</label><input placeholder="JOHN SMITH" id="name_${empCount}" value="${d.name||''}"></div>
+      <div><label>Employee ID</label><input placeholder="ID" id="emp_id_${empCount}" value="${d.emp_id||''}"></div>
+    </div>
+    <div class="grid">
+      <div><label>Hourly Rate $</label><input type="number" id="rate_${empCount}" step="0.01" value="${d.rate||''}"></div>
+      <div><label>Regular Hours</label><input type="number" id="reg_${empCount}" step="0.01" value="${d.reg||80}"></div>
+      <div><label>Overtime Hours</label><input type="number" id="ot_${empCount}" step="0.01" value="${d.ot||0}"></div>
+    </div>
+    <div class="grid">
+      <div><label>Holiday Hours</label><input type="number" id="hol_${empCount}" step="0.01" value="${d.holiday||0}"></div>
+      <div><label>BonusTravel Hours</label><input type="number" id="bt_h_${empCount}" step="0.01" value="${d.travel||0}"></div>
+      <div><label>BonusTravel Rate $</label><input type="number" id="bt_r_${empCount}" step="0.01" value="${d.travelRate||0}"></div>
+    </div>
+    <div class="grid">
+      <div><label>ToolsPurch $</label><input type="number" id="tools_${empCount}" step="0.01" value="${d.tools||0}"></div>
+      <div><label>LevyGarn $</label><input type="number" id="levy_${empCount}" step="0.01" value="${d.levy||0}"></div>
+      <div><label>Insurance $</label><input type="number" id="ins_${empCount}" step="0.01" value="${d.insurance||0}"></div>
+    </div>`;
   document.getElementById('employees').appendChild(div);
 }
 function removeEmp(n){document.getElementById('emp_'+n).remove();}
@@ -303,7 +317,19 @@ function showResults(){
   let html='',totalGross=0,totalNet=0;
   payrollData.forEach(p=>{
     totalGross+=p.gross;totalNet+=p.net;
-    html+=`<div class="stub"><h3>${p.name} &mdash; Check Date: ${new Date().toLocaleDateString()}</h3><div class="row"><span>Gross Pay</span><span>$${p.gross.toFixed(2)}</span></div><div class="row"><span>Federal Income</span><span>-$${p.federal.toFixed(2)}</span></div><div class="row"><span>Soc Sec</span><span>-$${p.social_security.toFixed(2)}</span></div><div class="row"><span>Medicare</span><span>-$${p.medicare.toFixed(2)}</span></div><div class="row"><span>State (KS)</span><span>-$${p.state.toFixed(2)}</span></div><div class="row"><span>ToolsPurch</span><span>-$${p.tools_purch.toFixed(2)}</span></div><div class="row"><span>LevyGarn</span><span>-$${p.levy_garn.toFixed(2)}</span></div><div class="row"><span>Insurance</span><span>-$${p.insurance.toFixed(2)}</span></div><div class="row"><span>Regular ${p.regular_hours}hrs @ $${p.hourly_rate}</span><span>$${p.regular_pay.toFixed(2)}</span></div><div class="row"><span>Overtime ${p.overtime_hours}hrs @ $${(p.hourly_rate*1.5).toFixed(2)}</span><span>$${p.overtime_pay.toFixed(2)}</span></div><div class="row"><span>Holiday ${p.holiday_hours}hrs</span><span>$${p.holiday_pay.toFixed(2)}</span></div><div class="row total"><span>NET CHECK</span><span>$${p.net.toFixed(2)}</span></div></div>`;
+    html+=`<div class="stub"><h3>${p.name} &mdash; Check Date: ${new Date().toLocaleDateString()}</h3>
+      <div class="row"><span>Gross Pay</span><span>$${p.gross.toFixed(2)}</span></div>
+      <div class="row"><span>Federal Income</span><span>-$${p.federal.toFixed(2)}</span></div>
+      <div class="row"><span>Soc Sec</span><span>-$${p.social_security.toFixed(2)}</span></div>
+      <div class="row"><span>Medicare</span><span>-$${p.medicare.toFixed(2)}</span></div>
+      <div class="row"><span>State (KS)</span><span>-$${p.state.toFixed(2)}</span></div>
+      <div class="row"><span>ToolsPurch</span><span>-$${p.tools_purch.toFixed(2)}</span></div>
+      <div class="row"><span>LevyGarn</span><span>-$${p.levy_garn.toFixed(2)}</span></div>
+      <div class="row"><span>Insurance</span><span>-$${p.insurance.toFixed(2)}</span></div>
+      <div class="row"><span>Regular ${p.regular_hours}hrs @ $${p.hourly_rate}</span><span>$${p.regular_pay.toFixed(2)}</span></div>
+      <div class="row"><span>Overtime ${p.overtime_hours}hrs @ $${(p.hourly_rate*1.5).toFixed(2)}</span><span>$${p.overtime_pay.toFixed(2)}</span></div>
+      <div class="row"><span>Holiday ${p.holiday_hours}hrs</span><span>$${p.holiday_pay.toFixed(2)}</span></div>
+      <div class="row total"><span>NET CHECK</span><span>$${p.net.toFixed(2)}</span></div></div>`;
   });
   document.getElementById('stubs').innerHTML=html;
   document.getElementById('summary').innerHTML=`Total Employees: ${payrollData.length} | Total Gross: $${totalGross.toFixed(2)} | Total Net: $${totalNet.toFixed(2)}`;
@@ -349,7 +375,7 @@ class Handler(BaseHTTPRequestHandler):
                         try:
                             hours=parse_timecard_xlsx(file_data)
                             if not hours:
-                                raise Exception("empty")
+                                raise Exception("No hours in xlsx")
                         except:
                             hours=parse_timecard_csv(file_data.decode('utf-8',errors='ignore'))
                     else:
