@@ -1,42 +1,180 @@
-import pandas as pd
+import json
+import csv
+import os
+import io
+from datetime import datetime
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
-def process_file(file):
-    df = pd.read_excel(file, header=None)
+import openpyxl
 
-    # Drop completely empty rows
-    df = df.dropna(how='all')
+# ===== TAX SETTINGS =====
+FEDERAL_TAX = 0.1077
+STATE_TAX = 0.0444
+SOCIAL_SECURITY = 0.062
+MEDICARE = 0.0145
 
-    # Convert everything to string for easier searching
-    df = df.astype(str)
+YTD_FILE = "ytd_data.json"
+EMPLOYEES_FILE = "employees.json"
 
-    # Keep only rows that contain "In" or "Out"
-    df = df[df.apply(lambda row: row.str.contains("In|Out", case=False).any(), axis=1)]
 
-    # Extract columns manually (based on your file layout)
-    df = df.reset_index(drop=True)
+# ===== FILE STORAGE =====
+def load_ytd():
+    if os.path.exists(YTD_FILE):
+        with open(YTD_FILE) as f:
+            return json.load(f)
+    return {}
 
-    # Guess positions (these match your screenshot)
-    df["Employee"] = df[0]
-    df["Action"] = df[1]
-    df["Date"] = df[3]
-    df["Time"] = df[4]
+def save_ytd(ytd):
+    with open(YTD_FILE, "w") as f:
+        json.dump(ytd, f, indent=2)
 
-    # Combine date + time
-    df["datetime"] = pd.to_datetime(df["Date"] + " " + df["Time"], errors="coerce")
+def load_employees():
+    if os.path.exists(EMPLOYEES_FILE):
+        with open(EMPLOYEES_FILE) as f:
+            return json.load(f)
+    return []
 
-    # Sort
-    df = df.sort_values(by=["Employee", "datetime"])
+def save_employees(emps):
+    with open(EMPLOYEES_FILE, "w") as f:
+        json.dump(emps, f, indent=2)
 
-    # Calculate hours between punches
-    df["hours"] = df.groupby("Employee")["datetime"].diff().dt.total_seconds() / 3600
 
-    # Only count OUT rows
-    df = df[df["Action"].str.lower() == "out"]
+# ===== PAYROLL CALC =====
+def calculate(data):
+    r = float(data.get("regular_hours", 0))
+    o = float(data.get("overtime_hours", 0))
+    h = float(data.get("holiday_hours", 0))
+    rate = float(data.get("hourly_rate", 0))
 
-    # Drop bad rows
-    df = df.dropna(subset=["hours"])
+    regular_pay = r * rate
+    overtime_pay = o * (rate * 1.5)
+    holiday_pay = h * rate
 
-    # Final result
-    result = df.groupby("Employee")["hours"].sum().reset_index()
+    gross = regular_pay + overtime_pay + holiday_pay
 
-    return result
+    federal = gross * FEDERAL_TAX
+    state = gross * STATE_TAX
+    ss = gross * SOCIAL_SECURITY
+    medicare = gross * MEDICARE
+
+    net = gross - federal - state - ss - medicare
+
+    return {
+        "name": data.get("name"),
+        "gross": round(gross, 2),
+        "net": round(net, 2),
+        "regular_hours": r,
+        "overtime_hours": o
+    }
+
+
+# ===== 🔥 FIXED TIME PARSER =====
+def parse_timecard_xlsx(file_bytes):
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    ws = wb.active
+
+    records = []
+
+    for row in ws.iter_rows(values_only=True):
+        cells = [str(c).strip() if c else "" for c in row]
+
+        if not any(cells):
+            continue
+
+        employee = cells[0]
+
+        action = next((c for c in cells if c.lower() in ["in", "out"]), None)
+        date = next((c for c in cells if "/" in c), None)
+        time = next((c for c in cells if ":" in c), None)
+
+        if employee and action and date and time:
+            try:
+                dt = datetime.strptime(f"{date} {time}", "%m/%d/%Y %I:%M:%S %p")
+                records.append({
+                    "emp": employee,
+                    "action": action.lower(),
+                    "time": dt
+                })
+            except:
+                continue
+
+    records.sort(key=lambda x: (x["emp"], x["time"]))
+
+    hours = {}
+    last_in = {}
+
+    for r in records:
+        emp = r["emp"]
+
+        if r["action"] == "in":
+            last_in[emp] = r["time"]
+
+        elif r["action"] == "out" and emp in last_in:
+            diff = (r["time"] - last_in[emp]).total_seconds() / 3600
+            hours[emp] = hours.get(emp, 0) + round(diff, 2)
+
+    return hours
+
+
+# ===== WEB SERVER =====
+class Handler(BaseHTTPRequestHandler):
+
+    def log_message(self, format, *args):
+        return
+
+    def do_GET(self):
+        if self.path == "/get-employees":
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(load_employees()).encode())
+            return
+
+        self.send_response(200)
+        self.send_header("Content-type", "text/html")
+        self.end_headers()
+        self.wfile.write(b"<h1>OpenClaw Payroll Running</h1>")
+
+    def do_POST(self):
+
+        # ===== UPLOAD FILE =====
+        if self.path == "/upload-timecard":
+            import cgi
+            ctype, pdict = cgi.parse_header(self.headers.get('Content-Type'))
+
+            if ctype == 'multipart/form-data':
+                pdict['boundary'] = bytes(pdict['boundary'], "utf-8")
+                fields = cgi.parse_multipart(self.rfile, pdict)
+                file_data = fields.get("file")[0]
+
+                try:
+                    hours = parse_timecard_xlsx(file_data)
+                    result = {"success": True, "hours": hours}
+                except Exception as e:
+                    result = {"success": False, "error": str(e)}
+            else:
+                result = {"success": False}
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+
+        # ===== CALCULATE =====
+        length = int(self.headers["Content-Length"])
+        data = json.loads(self.rfile.read(length))
+
+        if self.path == "/calculate":
+            result = calculate(data)
+
+            self.send_response(200)
+            self.send_header("Content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+            return
+
+
+# ===== START SERVER =====
+print("Running on port 8080...")
+HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
