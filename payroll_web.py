@@ -93,23 +93,13 @@ def parse_timecard_xlsx(file_bytes):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
     hours = {}
-    current_emp = None
     for row in ws.iter_rows(values_only=True):
         cells = [str(c).strip() if c is not None else '' for c in row]
-        full = ' '.join(cells)
-        if 'TOTAL' in full:
-            for i, c in enumerate(cells):
-                if 'TOTAL' in c:
-                    name = c.replace('TOTAL', '').strip()
-                    if name:
-                        current_emp = name
-                        dur = next((x for x in cells if 'min' in x or 'hr' in x), '')
-                        hours[name] = parse_duration(dur) if dur and dur != '0 mins' else 0
-                    break
-        elif 'Out' in cells:
-            dur = next((c for c in cells if ('hr' in c or 'min' in c) and c != ''), '')
-            if dur and current_emp:
-                hours[current_emp] = hours.get(current_emp, 0) + parse_duration(dur)
+        name = cells[2] if len(cells) > 2 else ''
+        status = cells[4] if len(cells) > 4 else ''
+        duration = cells[6] if len(cells) > 6 else ''
+        if name and status == 'TOTAL':
+            hours[name] = parse_duration(duration)
     return hours
 
 def parse_timecard_csv(content):
