@@ -93,45 +93,24 @@ def parse_timecard_xlsx(file_bytes):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
 
-    records = []
+    hours = {}
+    current_employee = None
 
     for row in ws.iter_rows(values_only=True):
         cells = [str(c).strip() if c is not None else '' for c in row]
+        row_text = " ".join(cells).upper()
 
-        if not any(cells):
-            continue
+        if "TOTAL" in row_text:
+            name = row_text.replace("TOTAL", "").strip()
+            if name:
+                current_employee = name
+                hours[current_employee] = 0
 
-        employee = cells[0]
+        duration_cell = next((c for c in cells if "HR" in c or "MIN" in c), None)
 
-        action = next((c for c in cells if c.lower() in ["in", "out"]), None)
-        date = next((c for c in cells if "/" in c), None)
-        time = next((c for c in cells if ":" in c), None)
-
-        if employee and action and date and time:
-            try:
-                dt = datetime.strptime(f"{date} {time}", "%m/%d/%Y %I:%M:%S %p")
-                records.append({
-                    "emp": employee,
-                    "action": action.lower(),
-                    "time": dt
-                })
-            except:
-                continue
-
-    records.sort(key=lambda x: (x["emp"], x["time"]))
-
-    hours = {}
-    last_in = {}
-
-    for r in records:
-        emp = r["emp"]
-
-        if r["action"] == "in":
-            last_in[emp] = r["time"]
-
-        elif r["action"] == "out" and emp in last_in:
-            diff = (r["time"] - last_in[emp]).total_seconds() / 3600
-            hours[emp] = hours.get(emp, 0) + round(diff, 2)
+        if current_employee and duration_cell:
+            hrs = parse_duration(duration_cell)
+            hours[current_employee] += hrs
 
     return hours
 def parse_timecard_csv(content):
