@@ -92,15 +92,47 @@ def parse_duration(s):
 def parse_timecard_xlsx(file_bytes):
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
-    hours = {}
+
+    records = []
+
     for row in ws.iter_rows(values_only=True):
         cells = [str(c).strip() if c is not None else '' for c in row]
-        if len(cells) > 6:
-            name = cells[2]
-            status = cells[4]
-            duration = cells[6]
-            if name and status == 'TOTAL':
-                hours[name] = parse_duration(duration)
+
+        if not any(cells):
+            continue
+
+        employee = cells[0]
+
+        action = next((c for c in cells if c.lower() in ["in", "out"]), None)
+        date = next((c for c in cells if "/" in c), None)
+        time = next((c for c in cells if ":" in c), None)
+
+        if employee and action and date and time:
+            try:
+                dt = datetime.strptime(f"{date} {time}", "%m/%d/%Y %I:%M:%S %p")
+                records.append({
+                    "emp": employee,
+                    "action": action.lower(),
+                    "time": dt
+                })
+            except:
+                continue
+
+    records.sort(key=lambda x: (x["emp"], x["time"]))
+
+    hours = {}
+    last_in = {}
+
+    for r in records:
+        emp = r["emp"]
+
+        if r["action"] == "in":
+            last_in[emp] = r["time"]
+
+        elif r["action"] == "out" and emp in last_in:
+            diff = (r["time"] - last_in[emp]).total_seconds() / 3600
+            hours[emp] = hours.get(emp, 0) + round(diff, 2)
+
     return hours
 def parse_timecard_csv(content):
     hours = {}
