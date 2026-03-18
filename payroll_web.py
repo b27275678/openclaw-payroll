@@ -94,23 +94,36 @@ def parse_timecard_xlsx(file_bytes):
     ws = wb.active
 
     hours = {}
-    current_employee = None
 
     for row in ws.iter_rows(values_only=True):
-        cells = [str(c).strip() if c is not None else '' for c in row]
-        row_text = " ".join(cells).upper()
+        cells = [str(c).strip() if c is not None else "" for c in row]
+        row_text = " ".join(cells)
 
-        if "TOTAL" in row_text:
-            name = row_text.replace("TOTAL", "").strip()
+        # Look for TOTAL rows
+        if "TOTAL" in row_text.upper():
+
+            # Extract name (before TOTAL)
+            parts = row_text.upper().split("TOTAL")
+            name = parts[0].strip().title()
+
+            # Extract duration text
+            duration_text = parts[-1]
+
+            hrs = 0
+
+            h = re.search(r'(\d+)\s*HR', duration_text.upper())
+            m = re.search(r'(\d+)\s*MIN', duration_text.upper())
+            s = re.search(r'(\d+)\s*SEC', duration_text.upper())
+
+            if h:
+                hrs += int(h.group(1))
+            if m:
+                hrs += int(m.group(1)) / 60
+            if s:
+                hrs += int(s.group(1)) / 3600
+
             if name:
-                current_employee = name
-                hours[current_employee] = 0
-
-        duration_cell = next((c for c in cells if "HR" in c or "MIN" in c), None)
-
-        if current_employee and duration_cell:
-            hrs = parse_duration(duration_cell)
-            hours[current_employee] += hrs
+                hours[name] = round(hrs, 2)
 
     return hours
 def parse_timecard_csv(content):
