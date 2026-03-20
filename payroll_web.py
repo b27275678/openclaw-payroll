@@ -333,9 +333,10 @@ class Handler(BaseHTTPRequestHandler):
                     file_data = str(file_data).encode()
                 try:
                     hours = parse_schedule_xlsx(file_data)
-                    result = {'success': True, 'hours': hours}
+                    result = {'success': True, 'hours': hours, 'debug': f'parsed {len(hours)} employees from {len(file_data)} bytes'}
                 except Exception as e:
-                    result = {'success': False, 'error': str(e)}
+                    import traceback
+                    result = {'success': False, 'error': str(e), 'trace': traceback.format_exc()}
             else:
                 result = {'success': False, 'error': 'Invalid upload'}
             self.send_response(200)
