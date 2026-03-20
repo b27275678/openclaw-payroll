@@ -1,8 +1,4 @@
-import json
-import csv
-import os
-import re
-import io
+import json, csv, os, re, io
 try:
     import openpyxl
     HAS_OPENPYXL = True
@@ -20,23 +16,38 @@ EMPLOYEES_FILE = "employees.json"
 
 def load_ytd():
     if os.path.exists(YTD_FILE):
-        with open(YTD_FILE) as f:
-            return json.load(f)
+        with open(YTD_FILE) as f: return json.load(f)
     return {}
 
 def save_ytd(ytd):
-    with open(YTD_FILE, "w") as f:
-        json.dump(ytd, f, indent=2)
+    with open(YTD_FILE, "w") as f: json.dump(ytd, f, indent=2)
 
 def load_employees():
     if os.path.exists(EMPLOYEES_FILE):
-        with open(EMPLOYEES_FILE) as f:
-            return json.load(f)
+        with open(EMPLOYEES_FILE) as f: return json.load(f)
     return []
 
 def save_employees(emps):
-    with open(EMPLOYEES_FILE, "w") as f:
-        json.dump(emps, f, indent=2)
+    with open(EMPLOYEES_FILE, "w") as f: json.dump(emps, f, indent=2)
+
+def parse_schedule_xlsx(file_bytes):
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
+    ws = wb.active
+    hours = {}
+    for row in ws.iter_rows(values_only=True):
+        fw = row[8] if len(row) > 8 else None
+        tr = row[14] if len(row) > 14 else None
+        if not fw or not tr or '-' not in str(tr):
+            continue
+        try:
+            parts = str(tr).split(' - ')
+            s = datetime.strptime(parts[0].strip(), '%I:%M %p')
+            e = datetime.strptime(parts[1].strip(), '%I:%M %p')
+            h = (e - s).seconds / 3600
+            hours[fw] = round(hours.get(fw, 0) + h, 2)
+        except:
+            pass
+    return hours
 
 def calculate(data):
     r = float(data.get("regular_hours", 0))
@@ -59,74 +70,17 @@ def calculate(data):
     insurance = float(data.get("insurance", 0))
     net = gross - federal - state - ss - medicare - tools - levy - insurance
     return {
-        "name": data.get("name"),
-        "emp_id": data.get("emp_id"),
+        "name": data.get("name"), "emp_id": data.get("emp_id"),
         "hourly_rate": rate,
         "regular_hours": r, "regular_pay": round(regular_pay, 2),
         "overtime_hours": o, "overtime_pay": round(overtime_pay, 2),
         "holiday_hours": h, "holiday_pay": round(holiday_pay, 2),
         "bonus_travel_hours": bt_h, "bonus_travel_rate": bt_r, "bonus_pay": round(bonus_pay, 2),
-        "gross": round(gross, 2),
-        "federal": round(federal, 2),
-        "state": round(state, 2),
-        "social_security": round(ss, 2),
-        "medicare": round(medicare, 2),
-        "tools_purch": round(tools, 2),
-        "levy_garn": round(levy, 2),
-        "insurance": round(insurance, 2),
-        "net": round(net, 2)
+        "gross": round(gross, 2), "federal": round(federal, 2), "state": round(state, 2),
+        "social_security": round(ss, 2), "medicare": round(medicare, 2),
+        "tools_purch": round(tools, 2), "levy_garn": round(levy, 2),
+        "insurance": round(insurance, 2), "net": round(net, 2)
     }
-
-def parse_duration(s):
-    if not s: return 0
-    s = str(s)
-    total = 0
-    h = re.search(r'(\d+)\s*hr', s)
-    m = re.search(r'(\d+)\s*min', s)
-    sc = re.search(r'(\d+)\s*sec', s)
-    if h: total += int(h.group(1))
-    if m: total += int(m.group(1)) / 60
-    if sc: total += int(sc.group(1)) / 3600
-    return round(total, 2)
-
-def parse_timecard_xlsx(file_bytes):
-    from datetime import datetime as dt
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
-    ws = wb.active
-    hours = {}
-    for row in ws.iter_rows(values_only=True):
-        fw = row[8] if len(row) > 8 else None
-        tr = row[14] if len(row) > 14 else None
-        if not fw or not tr or '-' not in str(tr):
-            continue
-        try:
-            parts = str(tr).split(' - ')
-            s = dt.strptime(parts[0].strip(), '%I:%M %p')
-            e = dt.strptime(parts[1].strip(), '%I:%M %p')
-            h = (e - s).seconds / 3600
-            hours[fw] = round(hours.get(fw, 0) + h, 2)
-        except:
-            pass
-    return hours
-def parse_timecard_csv(content):
-    hours = {}
-    current_emp = None
-    for line in content.strip().split('\n'):
-        line = line.strip()
-        if not line: continue
-        parts = [p.strip().strip('"') for p in line.split(',')]
-        full = ' '.join(parts)
-        if 'TOTAL' in full:
-            name = parts[0].replace('TOTAL', '').strip()
-            dur = next((p for p in parts if 'min' in p or 'hr' in p), '')
-            if name:
-                current_emp = name
-                hours[name] = parse_duration(dur) if dur and dur != '0 mins' else 0
-        elif 'Out' in parts and current_emp:
-            dur = next((p for p in parts if ('hr' in p or 'min' in p) and p), '')
-            if dur:
-                hours[current_emp] = hours.get(current_emp, 0) + parse_duration(dur)
-    return hours
 
 HTML = """<!DOCTYPE html>
 <html>
@@ -157,7 +111,7 @@ button:hover{opacity:0.9}
 .alert-info{background:#0f3460;border:1px solid #4a90d9;color:#adf}
 .alert-success{background:#0a2a1a;border:1px solid #27ae60;color:#afd}
 .alert-warn{background:#2a1a0a;border:1px solid #f5e642;color:#fda}
-.tabs{display:flex;gap:5px;margin-bottom:15px;max-width:900px;margin:0 auto 15px}
+.tabs{display:flex;gap:5px;max-width:900px;margin:0 auto 15px}
 .tab{padding:10px 20px;border-radius:5px;cursor:pointer;background:#0f3460;border:1px solid #333;color:#eee}
 .tab.active{background:#f5e642;color:#000;font-weight:bold}
 .tab-content{display:none;max-width:900px;margin:0 auto}
@@ -178,13 +132,13 @@ button:hover{opacity:0.9}
   <div class="sync-box">
     <h3>Step-by-step every payday:</h3>
     <div class="alert alert-info">
-      1. Go to RazorSync &rarr; Reports &rarr; Time Card &rarr; Detailed Time Card<br>
+      1. Go to RazorSync &rarr; Reports &rarr; Schedule<br>
       2. Set your pay period dates and click RUN<br>
       3. Click EXPORT TO EXCEL and save the file<br>
       4. Upload that file below &mdash; hours fill in automatically!
     </div>
-    <label>Upload RazorSync Time Card File (Excel or CSV)</label>
-    <input type="file" id="timecard-file" accept=".csv,.xlsx,.xls" style="margin:10px 0">
+    <label>Upload RazorSync Schedule File (Excel)</label>
+    <input type="file" id="timecard-file" accept=".xlsx,.xls" style="margin:10px 0">
     <button class="sync-btn" onclick="uploadTimecard()">Upload &amp; Auto-Fill Hours</button>
     <div id="sync-result"></div>
   </div>
@@ -228,7 +182,7 @@ async function uploadTimecard(){
     const r=await fetch('/upload-timecard',{method:'POST',body:formData});
     const data=await r.json();
     if(data.success&&Object.keys(data.hours).length>0){
-      let msg='<div class="alert alert-success">Hours updated:<br>';
+      let msg='<div class="alert alert-success">Hours imported successfully!<br><br>';
       Object.entries(data.hours).forEach(([name,hrs])=>{
         const reg=Math.min(hrs,40),ot=Math.max(hrs-40,0);
         msg+=`&bull; ${name}: ${hrs} hrs`;
@@ -238,8 +192,10 @@ async function uploadTimecard(){
       msg+='<br>Go to Employees tab to review, then Run Payroll!</div>';
       res.innerHTML=msg;
       updateEmployeeHours(data.hours);
+    } else if(data.error){
+      res.innerHTML='<div class="alert alert-warn">Error: '+data.error+'</div>';
     } else {
-      res.innerHTML='<div class="alert alert-warn">No hours found in file. Make sure you exported the Detailed Time Card from RazorSync.</div>';
+      res.innerHTML='<div class="alert alert-warn">No hours found in file.</div>';
     }
   }catch(e){
     res.innerHTML='<div class="alert alert-warn">Upload failed: '+e.message+'</div>';
@@ -254,9 +210,7 @@ function updateEmployeeHours(hours){
     const name=nameEl.value.toLowerCase().trim();
     for(const[empName,totalHrs]of Object.entries(hours)){
       const en=empName.toLowerCase();
-      const firstName=en.split(' ')[0];
-      const lastName=en.split(' ').slice(-1)[0];
-      if(name&&(en.includes(name)||name.includes(firstName)||name.includes(lastName)||firstName.includes(name.split(' ')[0]))){
+      if(name&&(en.includes(name)||name.includes(en.split(' ')[0]))){
         document.getElementById('reg_'+i).value=Math.min(totalHrs,40).toFixed(2);
         document.getElementById('ot_'+i).value=Math.max(totalHrs-40,0).toFixed(2);
         break;
@@ -281,7 +235,7 @@ function addEmployee(data){
     </div>
     <div class="grid">
       <div><label>Hourly Rate $</label><input type="number" id="rate_${empCount}" step="0.01" value="${d.rate||''}"></div>
-      <div><label>Regular Hours</label><input type="number" id="reg_${empCount}" step="0.01" value="${d.reg||80}"></div>
+      <div><label>Regular Hours</label><input type="number" id="reg_${empCount}" step="0.01" value="${d.reg||0}"></div>
       <div><label>Overtime Hours</label><input type="number" id="ot_${empCount}" step="0.01" value="${d.ot||0}"></div>
     </div>
     <div class="grid">
@@ -353,77 +307,73 @@ fetch('/get-employees').then(r=>r.json()).then(emps=>{
 </html>"""
 
 class Handler(BaseHTTPRequestHandler):
-    
-    def log_message(self,format,*args):pass
+    def log_message(self, format, *args): pass
+
     def do_GET(self):
-        if self.path=='/get-employees':
-            emps=load_employees()
+        if self.path == '/get-employees':
             self.send_response(200)
-            self.send_header("Content-type","application/json")
+            self.send_header("Content-type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps(emps).encode())
+            self.wfile.write(json.dumps(load_employees()).encode())
         else:
             self.send_response(200)
-            self.send_header("Content-type","text/html")
+            self.send_header("Content-type", "text/html")
             self.end_headers()
             self.wfile.write(HTML.encode())
+
     def do_POST(self):
-        if self.path=='/upload-timecard':
+        if self.path == '/upload-timecard':
             import cgi
-            ctype,pdict=cgi.parse_header(self.headers.get('Content-Type',''))
-            if ctype=='multipart/form-data':
-                pdict['boundary']=bytes(pdict['boundary'],'utf-8')
-                fields=cgi.parse_multipart(self.rfile,pdict)
-                file_data=fields.get('file',[b''])[0]
-                if not isinstance(file_data,bytes):
-                    file_data=str(file_data).encode()
+            ctype, pdict = cgi.parse_header(self.headers.get('Content-Type', ''))
+            if ctype == 'multipart/form-data':
+                pdict['boundary'] = bytes(pdict['boundary'], 'utf-8')
+                fields = cgi.parse_multipart(self.rfile, pdict)
+                file_data = fields.get('file', [b''])[0]
+                if not isinstance(file_data, bytes):
+                    file_data = str(file_data).encode()
                 try:
-                    if HAS_OPENPYXL:
-                        try:
-                            hours=parse_timecard_xlsx(file_data)
-                            if not hours:
-                                raise Exception("No hours in xlsx")
-                        except:
-                            hours=parse_timecard_csv(file_data.decode('utf-8',errors='ignore'))
-                    else:
-                        hours=parse_timecard_csv(file_data.decode('utf-8',errors='ignore'))
-                    result={'success':True,'hours':hours}
+                    hours = parse_schedule_xlsx(file_data)
+                    result = {'success': True, 'hours': hours}
                 except Exception as e:
-                    result={'success':False,'error':str(e)}
+                    result = {'success': False, 'error': str(e)}
             else:
-                result={'success':False,'error':'Invalid upload'}
+                result = {'success': False, 'error': 'Invalid upload'}
             self.send_response(200)
-            self.send_header("Content-type","application/json")
+            self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
             return
-        length=int(self.headers["Content-Length"])
-        data=json.loads(self.rfile.read(length))
-        if self.path=="/calculate":
-            result=calculate(data)
-            ytd=load_ytd()
-            name=result["name"]
+
+        length = int(self.headers["Content-Length"])
+        data = json.loads(self.rfile.read(length))
+
+        if self.path == "/calculate":
+            result = calculate(data)
+            ytd = load_ytd()
+            name = result["name"]
             if name not in ytd:
-                ytd[name]={k:0 for k in ["gross","federal","social_security","medicare","state","tools_purch","levy_garn","insurance","net"]}
+                ytd[name] = {k: 0 for k in ["gross","federal","social_security","medicare","state","tools_purch","levy_garn","insurance","net"]}
             for k in ytd[name]:
-                ytd[name][k]=round(ytd[name][k]+result.get(k,0),2)
+                ytd[name][k] = round(ytd[name][k] + result.get(k, 0), 2)
             save_ytd(ytd)
             self.send_response(200)
-            self.send_header("Content-type","application/json")
+            self.send_header("Content-type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
-        elif self.path=="/save":
-            filename=f"payroll_{datetime.now().strftime('%Y%m%d')}.csv"
-            with open(filename,"w",newline="") as f:
-                writer=csv.DictWriter(f,fieldnames=data[0].keys())
+
+        elif self.path == "/save":
+            filename = f"payroll_{datetime.now().strftime('%Y%m%d')}.csv"
+            with open(filename, "w", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=data[0].keys())
                 writer.writeheader()
                 writer.writerows(data)
             self.send_response(200)
             self.end_headers()
-        elif self.path=="/save-employees":
+
+        elif self.path == "/save-employees":
             save_employees(data)
             self.send_response(200)
             self.end_headers()
 
 print("OpenClaw Payroll running at http://localhost:8080")
-HTTPServer(("0.0.0.0",8080),Handler).serve_forever()
+HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()
