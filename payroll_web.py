@@ -90,41 +90,23 @@ def parse_duration(s):
     return round(total, 2)
 
 def parse_timecard_xlsx(file_bytes):
+    from datetime import datetime as dt
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), data_only=True)
     ws = wb.active
-
     hours = {}
-
     for row in ws.iter_rows(values_only=True):
-        cells = [str(c).strip() if c is not None else "" for c in row]
-        row_text = " ".join(cells)
-
-        # Look for TOTAL rows
-        if "TOTAL" in row_text.upper():
-
-            # Extract name (before TOTAL)
-            parts = row_text.upper().split("TOTAL")
-            name = parts[0].strip().title()
-
-            # Extract duration text
-            duration_text = parts[-1]
-
-            hrs = 0
-
-            h = re.search(r'(\d+)\s*HR', duration_text.upper())
-            m = re.search(r'(\d+)\s*MIN', duration_text.upper())
-            s = re.search(r'(\d+)\s*SEC', duration_text.upper())
-
-            if h:
-                hrs += int(h.group(1))
-            if m:
-                hrs += int(m.group(1)) / 60
-            if s:
-                hrs += int(s.group(1)) / 3600
-
-            if name:
-                hours[name] = round(hrs, 2)
-
+        fw = row[8] if len(row) > 8 else None
+        tr = row[14] if len(row) > 14 else None
+        if not fw or not tr or '-' not in str(tr):
+            continue
+        try:
+            parts = str(tr).split(' - ')
+            s = dt.strptime(parts[0].strip(), '%I:%M %p')
+            e = dt.strptime(parts[1].strip(), '%I:%M %p')
+            h = (e - s).seconds / 3600
+            hours[fw] = round(hours.get(fw, 0) + h, 2)
+        except:
+            pass
     return hours
 def parse_timecard_csv(content):
     hours = {}
