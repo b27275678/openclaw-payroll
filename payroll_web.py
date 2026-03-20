@@ -372,28 +372,7 @@ fetch('/get-employees').then(r=>r.json()).then(emps=>{
 
 class Handler(BaseHTTPRequestHandler):
     
-def parse_schedule(data):
-    import io, openpyxl
-    from datetime import datetime
-    wb = openpyxl.load_workbook(io.BytesIO(data))
-    ws = wb.active
-    employees = {}
-    for row in ws.iter_rows(values_only=True):
-        fw = row[8]
-        tr = row[14]
-        if not fw or not tr or "-" not in str(tr):
-            continue
-        try:
-            parts = str(tr).split(" - ")
-            s = datetime.strptime(parts[0].strip(), "%I:%M %p")
-            e = datetime.strptime(parts[1].strip(), "%I:%M %p")
-            h = (e - s).seconds / 3600
-            employees[fw] = round(employees.get(fw, 0) + h, 2)
-        except:
-            pass
-    return employees
-
-def log_message(self,format,*args):pass
+    def log_message(self,format,*args):pass
     def do_GET(self):
         if self.path=='/get-employees':
             emps=load_employees()
